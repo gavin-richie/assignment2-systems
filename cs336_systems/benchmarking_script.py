@@ -396,6 +396,7 @@ def memory_profile(enable_backward: bool=True, enable_optimizer:bool=True, mixed
                           eps=1e-8,
                           weight_decay=0.01)
         logits = model(inputs)
+        logger.info(f"{logits.dtype=}, targets.dtype={targets.dtype}")
         loss = cross_entropy(logits, targets)
         if enable_backward:
             loss.backward()
@@ -414,11 +415,49 @@ def memory_profile(enable_backward: bool=True, enable_optimizer:bool=True, mixed
             for _ in range(n_steps):
                 run_step(model, (inputs, targets), optimizer, enable_backward, enable_optimizer, mixed_precision)
                 profiler.step()
-            # profiler.export_memory_timeline(f"timeline_{enable_backward}_{enable_optimizer}.html", device=device)
-            profiler.export_chrome_trace(f"trace_{enable_backward}_{enable_optimizer}.json")
+            profiler.export_memory_timeline(f"timeline_{enable_backward}_{enable_optimizer}.html", device=device)
+            # profiler.export_chrome_trace(f"trace_{enable_backward}_{enable_optimizer}.json")
         torch.cuda.memory._dump_snapshot(f"memory_snapshot_{enable_backward}_{enable_optimizer}.pickle")
         torch.cuda.memory._record_memory_history(enabled=None)
 
+
+def memory_profiler(enable_backward: bool, enable_optimizer: bool, mixed_precision: bool = False):
+    with (nullcontext() if enable_backward else torch.no_grad()):
+        torch.cuda.memory._record_memory_history(max_entries=1_000_000)
+        n_steps = 3
+
+        model = initialize_model(**configs['large'])
+        device = model.lm_head.weight.device
+        batch = get_random_batch(batch_size=args.batch_size, context_length=128, vocab_size=10_000)
+        optimizer = AdamW(model.parameters(), lr=1e-4)
+
+        # warmup
+        loss = cross_entropy(model(batch[0]), batch[1])
+        if enable_backward:
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+        torch.cuda.synchronize()
+
+        with profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=0, warmup=0, active=1, repeat=n_steps),
+            experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True),
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        ) as prof:
+            for _ in range(n_steps):
+                # Run on a batch
+                run_step(model, batch, optimizer, enable_backward=enable_backward, enable_optimizer=enable_optimizer, mixed_precision=mixed_precision)
+                prof.step()
+            # Save timeline
+            prof.export_memory_timeline(f'timeline{enable_backward=}{enable_optimizer=}.html', device=device)
+        torch.cuda.memory._dump_snapshot(f'memory_snapshot{enable_backward=}{enable_optimizer=}.pickle')
+        torch.cuda.memory._record_memory_history(enabled=None)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
@@ -432,7 +471,7 @@ if __name__ == '__main__':
     # perform_nsys_profile(include_warmup=True, mixed_precision=False)
     # run_benchmark_suite()
     # profile_memory_full_step()
-    memory_profile(enable_backward=True, enable_optimizer=True, mixed_precision=False)
+    memory_profiler(enable_backward=True, enable_optimizer=True, mixed_precision=True)
 
 
 
