@@ -4,6 +4,8 @@ from typing import Type
 
 import torch
 
+from cs336_systems.DDPIndividualParams import DDPIndividualParameters
+from cs336_systems.ddp_overlap import DDPOverlap
 from cs336_systems.flash_attention import FlashAttentionTorch, FlashAttentionTriton
 
 
@@ -54,8 +56,9 @@ def get_ddp_individual_parameters(module: torch.nn.Module) -> torch.nn.Module:
         Instance of a DDP class.
     """
     # For example: return DDPIndividualParameters(module)
-    raise NotImplementedError
-
+    # raise NotImplementedError
+    # return DDPOverlap(module)
+    return DDPIndividualParameters(module)
 
 def ddp_individual_parameters_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
     """
@@ -69,8 +72,8 @@ def ddp_individual_parameters_on_after_backward(ddp_model: torch.nn.Module, opti
             Optimizer being used with the DDP-wrapped model.
     """
     # For example: ddp_model.finish_gradient_synchronization()
-    raise NotImplementedError
-
+    # raise NotImplementedError
+    ddp_model.finish_gradient_synchronization()
 
 def get_ddp_bucketed(module: torch.nn.Module, bucket_size_mb: float) -> torch.nn.Module:
     """
